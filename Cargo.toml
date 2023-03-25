@@ -3,7 +3,15 @@ name = "bmf-parse"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# Crates.io Metadata
+# github private email go brrrrr
+authors = ["GamingLiamStudios <58615717+GamingLiamStudios@users.noreply.github.com>"]
+description = "A parser for the BMF file format"
+repository = "https://github.com/GamingLiamStudios/bmf-parse"
+license = "MIT"
+
+keywords = ["iso-bmff", "mp4", "parsing"]
+categories = ["parsing"]
 
 [dependencies]
 paste = "1.0"
