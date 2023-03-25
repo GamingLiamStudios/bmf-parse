@@ -46,8 +46,10 @@ pub mod boxes {
             aux_info_type: u32 [if flags & 0x000001 != 0],
             aux_info_type_parameter: u32 [if flags & 0x000001 != 0],
 
-            entry_count: u32,
-            offset: [u64, u32] [if version == 1], // u64 if version == 1, u32 if version == 0
+            offset_count: u32,
+            offsets: [offset_count] {
+                offset: [u64, u32] [if version == 1], // u64 if version == 1, u32 if version == 0
+            },
         },
         Trun : Full {
             sample_count: u32,
