@@ -48,7 +48,7 @@ pub mod boxes {
 
             offset_count: u32,
             offsets: [offset_count] {
-                offset: [u64, u32] [if version == 1], // u64 if version == 1, u32 if version == 0
+                offset: [u32, u64] [if version == 1], // u64 if version == 1, u32 if version == 0
             },
         },
         Trun : Full {

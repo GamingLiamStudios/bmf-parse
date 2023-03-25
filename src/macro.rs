@@ -5,8 +5,8 @@ use std::fmt::Debug;
 pub(crate) trait Mp4BoxTrait: Debug {
     const TYPE: u32; // Should be 4 bytes/ASCII chars
 
-    fn parse_full(input: &[u8]) -> Self;
-    fn parse(input: &[u8], header: &Option<(u8, u32)>) -> Self;
+    fn parse_full(input: &[u8], state: &mut ParserState) -> Self;
+    fn parse(input: &[u8], state: &mut ParserState, header: &Option<(u8, u32)>) -> Self;
 }
 
 pub(crate) fn read_header<'a>(input: &'a [u8], state: &mut ParserState) -> (u32, &'a [u8]) {
@@ -30,23 +30,23 @@ pub(crate) fn read_fullbox_header(input: &[u8], state: &mut ParserState) -> (u8,
 macro_rules! mp4box_gen {
     // Read types
     { @read $input:ident $state:ident $header:ident; u8 } => {
-        read($input, &mut $state, 1).unwrap()[0]
+        read($input, $state, 1).unwrap()[0]
     };
     { @read $input:ident $state:ident $header:ident; u16 } => {
         {
-            let slice = read($input, &mut $state, 2).unwrap();
+            let slice = read($input, $state, 2).unwrap();
             u16::from_be_bytes([slice[0], slice[1]])
         }
     };
     { @read $input:ident $state:ident $header:ident; u32 } => {
         {
-            let slice = read($input, &mut $state, 4).unwrap();
+            let slice = read($input, $state, 4).unwrap();
             u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]])
         }
     };
     { @read $input:ident $state:ident $header:ident; u64 } => {
         {
-            let slice = read($input, &mut $state, 8).unwrap();
+            let slice = read($input, $state, 8).unwrap();
             u64::from_be_bytes([slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7]])
         }
     };
@@ -55,52 +55,52 @@ macro_rules! mp4box_gen {
     };
     { @read $input:ident $state:ident $header:ident; i16 } => {
         {
-            let slice = read($input, &mut $state, 2).unwrap();
+            let slice = read($input,$state, 2).unwrap();
             i16::from_be_bytes([slice[0], slice[1]])
         }
     };
     { @read $input:ident $state:ident $header:ident; i32 } => {
         {
-            let slice = read($input, &mut $state, 4).unwrap();
+            let slice = read($input, $state, 4).unwrap();
             i32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]])
         }
     };
     { @read $input:ident $state:ident $header:ident; i64 } => {
         {
-            let slice = read($input, &mut $state, 8).unwrap();
+            let slice = read($input, $state, 8).unwrap();
             i64::from_be_bytes([slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7]])
         }
     };
     { @read $input:ident $state:ident $header:ident; f32 } => {
         {
-            let slice = read($input, &mut $state, 4).unwrap();
+            let slice = read($input, $state, 4).unwrap();
             f32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]])
         }
     };
     { @read $input:ident $state:ident $header:ident; f64 } => {
         {
-            let slice = read($input, &mut $state, 8).unwrap();
+            let slice = read($input, $state, 8).unwrap();
             f64::from_be_bytes([slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7]])
         }
     };
     { @read $input:ident $state:ident $header:ident; [u8; $n:expr] } => { // Might also work with sizes defined by variables
         {
             let mut array = [0; $n];
-            array.copy_from_slice(read($input, &mut $state, $n).unwrap());
+            array.copy_from_slice(read($input, $state, $n).unwrap());
             array
         }
     };
     { @read $input:ident $state:ident $header:ident; [u8] } => {
-        read($input, &mut $state, $input.len() - $state.offset).unwrap()
+        read($input, $state, $input.len() - $state.offset).unwrap()
     };
     { @read $input:ident $state:ident $header:ident; Mp4Box } => {
-        parse_box($input, &mut $state).unwrap()
+        parse_box($input, $state).unwrap()
     };
 
     // Generic catch-all for metastructs
     { @read $input:ident $state:ident $header:ident; $($type:tt)* } => {
         //panic!("Unsupported type: {}", stringify!($type))
-        <$($type)*>::parse($input, &$header)
+        <$($type)*>::parse($input, $state, &$header)
     };
 
     // Condition expansion
@@ -114,6 +114,7 @@ macro_rules! mp4box_gen {
             let length = $length as usize;
             let mut vec = Vec::with_capacity(length);
             for _ in 0..length {
+                //println!("{} {}", $state.offset, $input.len());
                 vec.push(mp4box_gen! { @read $input $state $header; $type });
             }
             vec
@@ -196,15 +197,13 @@ macro_rules! mp4box_gen {
             impl Mp4BoxTrait for [<Box $name>] {
                 const TYPE: u32 = u32::from_ne_bytes([Self::IDSTR[0], Self::IDSTR[1], Self::IDSTR[2], Self::IDSTR[3]]);
 
-                fn parse_full(input: &[u8]) -> Self {
-                    let mut state = ParserState { offset: 0 };
-                    let (version, flags) = read_fullbox_header(input, &mut state);
+                fn parse_full(input: &[u8], state: &mut ParserState) -> Self {
+                    let (version, flags) = read_fullbox_header(input, state);
 
-                    Self::parse(&input[state.offset..], &Some(( version, flags )))
+                    Self::parse(input, state, &Some(( version, flags )))
                 }
 
-                fn parse(input: &[u8], header: &Option<(u8, u32)>) -> Self {
-                    let mut state = ParserState { offset: 0 };
+                fn parse(input: &[u8], state: &mut ParserState, header: &Option<(u8, u32)>) -> Self {
                     let uwh = header.unwrap();
                     let ($version, $flags) = uwh;
 
@@ -469,13 +468,11 @@ macro_rules! mp4box_gen {
             impl Mp4BoxTrait for [<Box $name>] {
                 const TYPE: u32 = u32::from_ne_bytes(*bstringify::bstringify!([<$name:lower>]));
 
-                fn parse_full(input: &[u8]) -> Self {
-                    Self::parse(input, &None)
+                fn parse_full(input: &[u8], state: &mut ParserState) -> Self {
+                    Self::parse(input, state, &None)
                 }
 
-                fn parse(input: &[u8], _: &Option<(u8, u32)>) -> Self {
-                    let mut state = ParserState { offset: 0 };
-
+                fn parse(input: &[u8], state: &mut ParserState, _: &Option<(u8, u32)>) -> Self {
                     let mut data = vec![];
                     while !is_empty(input, &state) {
                         data.push(mp4box_gen!{ @read input state header; $type });
@@ -528,7 +525,7 @@ macro_rules! mp4box_gen {
 
                 match data.0 {
                     $([<Box $sname>]::TYPE => {
-                        Some(Mp4Box::$sname(Box::new([<Box $sname>]::parse_full(data.1))))
+                        Some(Mp4Box::$sname(Box::new([<Box $sname>]::parse_full(data.1, &mut ParserState { offset: 0 }))))
                     })*
                     _ => panic!("Unknown box type: {}", String::from_utf8_lossy(&u32::to_ne_bytes(data.0))),
                 }
