@@ -71,6 +71,8 @@ pub mod boxes {
 use base::*;
 use boxes::*;
 
+pub use boxes::Mp4Box;
+
 pub fn parse_mp4(input: &[u8]) -> Vec<Mp4Box> {
     let mut state = ParserState { offset: 0 };
     let mut boxes = vec![];
