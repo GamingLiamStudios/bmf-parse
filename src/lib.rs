@@ -1,5 +1,5 @@
-#![feature(trace_macros)]
-#![feature(log_syntax)]
+#[allow(unused_variables)]
+#[allow(unused_imports)]
 mod base;
 pub mod r#macro;
 
