@@ -16,3 +16,9 @@ pub(crate) fn read<'a>(input: &'a [u8], state: &mut ParserState, n: usize) -> Op
 pub(crate) fn is_empty(input: &[u8], state: &ParserState) -> bool {
     state.offset == input.len()
 }
+
+#[derive(Debug)]
+pub enum Either<A, B> {
+    A(A),
+    B(B),
+}

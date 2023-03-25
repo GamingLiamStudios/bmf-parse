@@ -47,7 +47,7 @@ pub mod boxes {
             aux_info_type_parameter: u32 [if flags & 0x000001 != 0],
 
             entry_count: u32,
-            //offset: [u64, u32] [if version == 1], // u64 if version == 1, u32 if version == 0
+            offset: [u64, u32] [if version == 1], // u64 if version == 1, u32 if version == 0
         },
         Trun : Full {
             sample_count: u32,
@@ -61,7 +61,7 @@ pub mod boxes {
                 sample_flags: u32 [if flags & 0x000400 != 0],
                 // i32 if version == 1, u32 if version == 0, only present if flags & 0x000800
                 // [A, B, C..] [C.. condition] [BC condition] [ABC/present condition]
-                //sample_composition_time_offset: [u32, i32] [if version == 1] [if flags & 0x000800 != 0],
+                sample_composition_time_offset: [u32, i32] [if version == 1] [if flags & 0x000800 != 0],
             }
         },
         Mdat : Container = u8,

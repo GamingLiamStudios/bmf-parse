@@ -104,61 +104,68 @@ macro_rules! mp4box_gen {
     };
 
     // Condition expansion
-    {
+    // Final layer
+    { // vec w/ non-option length
+        @cond
+        $input:ident $state:ident $header:ident;
+        [Vec<$type:tt, $length:ident>],
+    } => {
+        {
+            let length = $length as usize;
+            let mut vec = Vec::with_capacity(length);
+            for _ in 0..length {
+                vec.push(mp4box_gen! { @read $input $state $header; $type });
+            }
+            vec
+        }
+    };
+    { // vec w/ option length
+        @cond
+        $input:ident $state:ident $header:ident;
+        [Vec<$type:tt, Option<$length:ident>>],
+    } => {
+        {
+            let length = $length.unwrap() as usize;
+            let mut vec = Vec::with_capacity(length);
+            for _ in 0..length {
+                vec.push(mp4box_gen! { @read $input $state $header; $type });
+            }
+            vec
+        }
+    };
+    { // Simple type
+        @cond
+        $input:ident $state:ident $header:ident;
+        [$type:tt],
+    } => {
+        mp4box_gen! { @read $input $state $header; $type }
+    };
+
+    // Iterate
+    { // Either
+        @cond
+        $input:ident $state:ident $header:ident;
+        [Either<$type:tt, [$($btype:tt)*]>],
+        $cond:expr,
+        $($rest:tt)*
+    } => {
+        if $cond {
+            Either::A(mp4box_gen! { @cond $input $state $header; [$type], })
+        } else {
+            Either::B(mp4box_gen! { @cond $input $state $header; [$($btype)*], $($rest)* })
+        }
+    };
+    { // Option
         @cond
         $input:ident $state:ident $header:ident;
         [Option<[$($type:tt)*]>],
         $cond:expr,
+        $($rest:tt)*
     } => {
         if $cond {
-            Some(mp4box_gen! { @cond $input $state $header; [$($type)*], true, })
+            Some(mp4box_gen! { @cond $input $state $header; [$($type)*], $($rest)* })
         } else {
             None
-        }
-    };
-    {
-        @cond
-        $input:ident $state:ident $header:ident;
-        [Vec<[$($type:tt)*], Option<$length:ident>>],
-        $cond:expr,
-    } => {
-        if $cond {
-            let length = $length.unwrap() as usize;
-            let mut vec = Vec::with_capacity(length);
-            for _ in 0..length {
-                vec.push(mp4box_gen! { @cond $input $state $header; [$($type)*], true, });
-            }
-            vec
-        } else {
-            vec![]
-        }
-    };
-    {
-        @cond
-        $input:ident $state:ident $header:ident;
-        [Vec<[$($type:tt)*], $length:ident>],
-        $cond:expr,
-    } => {
-        if $cond {
-            let mut vec = Vec::with_capacity($length as usize);
-            for _ in 0..$length {
-                vec.push(mp4box_gen! { @cond $input $state $header; [$($type)*], true, });
-            }
-            vec
-        } else {
-            vec![]
-        }
-    };
-    { // Final layer
-        @cond
-        $input:ident $state:ident $header:ident;
-        [$($type:tt)*],
-        $cond:expr,
-    } => {
-        if $cond {
-            mp4box_gen! { @read $input $state $header; $($type)* }
-        } else {
-            panic!("Condition not met");
         }
     };
 
@@ -169,7 +176,7 @@ macro_rules! mp4box_gen {
         $name:ident Full {}; // No fields remaining
         [
             $([
-                $field:ident, [$($ftype:tt)*]&[$($ctype:tt)*]; $cond:expr,
+                $field:ident, [$($ftype:tt)*]&[$($ctype:tt)*]; $($cond:expr,)*
             ],)+ // Expanded fields
         ]
     } => {
@@ -198,7 +205,7 @@ macro_rules! mp4box_gen {
 
                 fn parse(input: &[u8], header: &Option<(u8, u32)>) -> Self {
                     let mut state = ParserState { offset: 0 };
-                    let uwh = header.as_ref().unwrap();
+                    let uwh = header.unwrap();
                     let ($version, $flags) = uwh;
 
                     // Split out into fields so they can reference each other
@@ -206,7 +213,7 @@ macro_rules! mp4box_gen {
                         let $field = mp4box_gen! {
                             @cond input state header;
                             [$($ctype)*],
-                            $cond,
+                            $($cond,)*
                         };
                     )+
 
@@ -226,7 +233,7 @@ macro_rules! mp4box_gen {
         $name:ident {}; // No fields remaining
         [
             $([
-                $field:ident, [$($ftype:tt)*]&[$($ctype:tt)*]; $cond:expr,
+                $field:ident, [$($ftype:tt)*]&[$($ctype:tt)*]; $($cond:expr,)*
             ],)+ // Expanded fields
         ]
     } => {
@@ -255,7 +262,7 @@ macro_rules! mp4box_gen {
                         let $field = mp4box_gen! {
                             @cond input state header; // Header is dummy object, not used in this context
                             [$($ctype)*],
-                            $cond,
+                            $($cond,)*,
                         };
                     )+
 
@@ -269,6 +276,61 @@ macro_rules! mp4box_gen {
         }
     };
 
+    // Conditional expansion
+    { // Complete
+        @cond_expand $version:ident $flags:ident;
+        $name:ident $($stype:ident)? {
+            [],
+            $($rest:tt)* // Remaining fields
+        }; [$($prev:tt)*], // Already expanded fields
+        [$field:ident, [$($ftype:tt)*]&[$($ctype:tt)*]; $($done:tt)*] // Current
+    } => {
+        mp4box_gen! {
+            @expand $version $flags;
+            $name $($stype)? {
+                $($rest)* // Remaining fields
+            }; [
+                $($prev)* // Already expanded fields
+                [$field, [$($ftype)*]&[$($ctype)*]; $($done)*],
+            ]
+        }
+    };
+    { // Complete with condition
+        @cond_expand $version:ident $flags:ident;
+        $name:ident $($stype:ident)? {
+            [] [if $cond:expr],
+            $($rest:tt)* // Remaining fields
+        }; [$($prev:tt)*], // Already expanded fields
+        [$field:ident, [$($ftype:tt)*]&[$($ctype:tt)*]; $($done:tt)*] // Current
+    } => {
+        mp4box_gen! {
+            @expand $version $flags;
+            $name $($stype)? {
+                $($rest)* // Remaining fields
+            }; [
+                $($prev)* // Already expanded fields
+                [$field, [Option<$($ftype)*>]&[Option<[$($ctype)*]>]; $cond, $($done)*],
+            ]
+        }
+    };
+    { // Iterate
+        @cond_expand $version:ident $flags:ident;
+        $name:ident $($stype:ident)? {
+            [$type:tt, $($rtype:tt,)*] [if $cond:expr] $([if $rcond:expr])*,
+            $($rest:tt)* // Remaining fields
+        }; [$($prev:tt)*], // Already expanded fields
+        [$field:ident, [$($ftype:tt)*]&[$($ctype:tt)*]; $($done:tt)*] // Current
+    } => {
+        mp4box_gen! {
+            @cond_expand $version $flags;
+            $name $($stype)? {
+                [$($rtype,)*] $([if $rcond])*,
+                $($rest)* // Remaining fields
+            }; [$($prev)*], // Already expanded fields
+            [$field, [Either<$type,$($ftype)*>]&[Either<$type,[$($ctype)*]>]; $cond, $($done)*]
+        }
+    };
+
     // Expansion TT
     // Struct
     { // Condition
@@ -276,7 +338,7 @@ macro_rules! mp4box_gen {
         $name:ident $($stype:ident)? {
             $field:ident: [$type:ident] {
                 $(
-                    $ifield:ident: $iftype:tt $({$($ifsdef:tt)+})? $([if $ifcond:expr])?
+                    $ifield:ident: $iftype:tt $({$($ifsdef:tt)+})? $([if $ifcond:expr])*
                 ),+ $(,)?
             } [if $cond:expr],
             $($rest:tt)* // Remaining fields
@@ -287,7 +349,7 @@ macro_rules! mp4box_gen {
                 @expand $version $flags;
                 [<$name:camel $field:camel Type>] $($stype)? {
                     $(
-                        $ifield: $iftype $({$($ifsdef)+})? $([if $ifcond])?,
+                        $ifield: $iftype $({$($ifsdef)+})? $([if $ifcond])*,
                     )+
                 }; []
             }
@@ -297,7 +359,7 @@ macro_rules! mp4box_gen {
                     $($rest)* // Remaining fields
                 }; [
                     $($prev)* // Already expanded fields
-                    [$field, [Vec<[<Box $name:camel $field:camel Type>]>]&[Vec<[[<Box $name:camel $field:camel Type>]],Option<$type>>]; $cond,],
+                    [$field, [Option<Vec<[<Box $name:camel $field:camel Type>]>>]&[Option<[Vec<[<Box $name:camel $field:camel Type>], Option<$type>>]>]; $cond,],
                 ]
             }
         }
@@ -307,7 +369,7 @@ macro_rules! mp4box_gen {
         $name:ident $($stype:ident)? {
             $field:ident: [$type:ident] {
                 $(
-                    $ifield:ident: $iftype:tt $({$($ifsdef:tt)+})? $([if $ifcond:expr])?
+                    $ifield:ident: $iftype:tt $({$($ifsdef:tt)+})? $([if $ifcond:expr])*
                 ),+ $(,)?
             },
             $($rest:tt)* // Remaining fields
@@ -318,7 +380,7 @@ macro_rules! mp4box_gen {
                 @expand $version $flags;
                 [<$name:camel $field:camel Type>] $($stype)? {
                     $(
-                        $ifield: $iftype $({$($ifsdef)+})? $([if $ifcond])?,
+                        $ifield: $iftype $({$($ifsdef)+})? $([if $ifcond])*,
                     )+
                 }; []
             }
@@ -328,13 +390,30 @@ macro_rules! mp4box_gen {
                     $($rest)* // Remaining fields
                 }; [
                     $($prev)* // Already expanded fields
-                    [$field, [Vec<[<Box $name:camel $field:camel Type>]>]&[Vec<[[<Box $name:camel $field:camel Type>]],$type>]; true,],
+                    [$field, [Vec<[<Box $name:camel $field:camel Type>]>]&[Vec<[<Box $name:camel $field:camel Type>], $type>]; ],
                 ]
             }
         }
     };
 
     // Non-struct
+    { // Multi-Condition
+        @expand $version:ident $flags:ident;
+        $name:ident $($stype:ident)? {
+            $field:ident: [$ftype:tt, $($type:tt),+ $(,)?] $([if $cond:expr])+,
+            $($rest:tt)* // Remaining fields
+        }; [$($prev:tt)*] // Already expanded fields
+    } => {
+        mp4box_gen! {
+            @cond_expand $version $flags;
+            $name $($stype)? {
+                [$($type,)*] $([if $cond])+,
+                $($rest)* // Remaining fields
+            }; [
+                $($prev)* // Already expanded fields
+            ], [$field, [$ftype]&[$ftype]; ]
+        }
+    };
     { // Condition
         @expand $version:ident $flags:ident;
         $name:ident $($stype:ident)? {
@@ -365,7 +444,7 @@ macro_rules! mp4box_gen {
                 $($rest)* // Remaining fields
             }; [
                 $($prev)* // Already expanded fields
-                [$field, [$type]&[$type]; true,],
+                [$field, [$type]&[$type];],
             ]
         }
     };
@@ -375,6 +454,9 @@ macro_rules! mp4box_gen {
         @expand $version:ident $flags:ident;
         $name:ident Container $type:tt
     } => {
+        use $crate::base::*;
+        use $crate::r#macro::*;
+
         paste::paste! {
             pub struct [<Box $name>] {
                 pub data: Vec<$type>,
@@ -415,7 +497,7 @@ macro_rules! mp4box_gen {
         $version:ident $flags:ident;
         $($sname:ident $(: $stype:ident $(= $svtype:tt)?)? $({
             $(
-                $field:ident: $ftype:tt $({$($fsdef:tt)+})? $([if $fcond:expr])?
+                $field:ident: $ftype:tt $({$($fsdef:tt)+})? $([if $fcond:expr])*
             ),+ $(,)?
         })?),* $(,)? // Trailing comma may be omitted
     } => {
@@ -423,7 +505,7 @@ macro_rules! mp4box_gen {
             @expand $version $flags;
             $sname $($stype $($svtype)?)? $({
                 $(
-                    $field: $ftype $({$($fsdef)+})? $([if $fcond])?,
+                    $field: $ftype $({$($fsdef)+})? $([if $fcond])*,
                 )+
             }; [])?
         })*
