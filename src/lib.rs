@@ -1,10 +1,12 @@
+#![feature(trace_macros)]
+#![feature(log_syntax)]
 mod base;
 pub mod r#macro;
 
 pub mod boxes {
     use crate::r#macro::mp4box_gen;
 
-    mp4box_gen! { flags version;
+    mp4box_gen! { version flags;
         Moof : Container,
         Mfhd : Full {
             seq_num: u32,
@@ -21,17 +23,48 @@ pub mod boxes {
         Tfdt : Full {
             base_media_decode_time: u64,
         },
-        /*
         Senc : Full {
-            samples: [u32] {
+            sample_count: u32,
+            samples: [sample_count] {
                 iv: [u8; 8],
-                subsamples: [u16] {
+                subsample_count: u16 [if flags & 0x000002 != 0],
+                subsamples: [subsample_count] {
                     clear_bytes: u16,
                     cipher_bytes: u32,
-                } [if flags & 0x000002]
+                } [if flags & 0x000002 != 0]
             }
         },
-        */
+        Saiz : Full {
+            aux_info_type: u32 [if flags & 0x000001 != 0],
+            aux_info_type_parameter: u32 [if flags & 0x000001 != 0],
+
+            default_sample_info_size: u8,
+            sample_count: u32,
+            sample_info_size: u8 [if default_sample_info_size == 0]
+        },
+        Saio : Full {
+            aux_info_type: u32 [if flags & 0x000001 != 0],
+            aux_info_type_parameter: u32 [if flags & 0x000001 != 0],
+
+            entry_count: u32,
+            //offset: [u64, u32] [if version == 1], // u64 if version == 1, u32 if version == 0
+        },
+        Trun : Full {
+            sample_count: u32,
+
+            data_offset: i32 [if flags & 0x000001 != 0],
+            first_sample_flags: u32 [if flags & 0x000004 != 0],
+
+            samples: [sample_count] {
+                sample_duration: u32 [if flags & 0x000100 != 0],
+                sample_size: u32 [if flags & 0x000200 != 0],
+                sample_flags: u32 [if flags & 0x000400 != 0],
+                // i32 if version == 1, u32 if version == 0, only present if flags & 0x000800
+                // [A, B, C..] [C.. condition] [BC condition] [ABC/present condition]
+                //sample_composition_time_offset: [u32, i32] [if version == 1] [if flags & 0x000800 != 0],
+            }
+        },
+        Mdat : Container = u8,
     }
 }
 
