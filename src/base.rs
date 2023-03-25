@@ -3,7 +3,6 @@ pub(crate) struct ParserState {
 }
 
 pub(crate) fn read<'a>(input: &'a [u8], state: &mut ParserState, n: usize) -> Option<&'a [u8]> {
-    println!("read({}): {} {}", input.len(), state.offset, n);
     if state.offset + n <= input.len() {
         let slice = &input[state.offset..state.offset + n];
         state.offset += n;

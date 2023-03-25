@@ -114,7 +114,6 @@ macro_rules! mp4box_gen {
             let length = $length as usize;
             let mut vec = Vec::with_capacity(length);
             for _ in 0..length {
-                //println!("{} {}", $state.offset, $input.len());
                 vec.push(mp4box_gen! { @read $input $state $header; $type });
             }
             vec
