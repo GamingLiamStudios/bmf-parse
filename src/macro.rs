@@ -7,6 +7,9 @@ pub(crate) trait Mp4BoxTrait: Debug {
 
     fn parse_full(input: &[u8], state: &mut ParserState) -> Self;
     fn parse(input: &[u8], state: &mut ParserState, header: &Option<(u8, u32)>) -> Self;
+
+    fn write_full(&self, output: &mut Vec<u8>);
+    fn write(&self, output: &mut Vec<u8>);
 }
 
 pub(crate) fn read_header<'a>(input: &'a [u8], state: &mut ParserState) -> (u32, &'a [u8]) {
@@ -83,19 +86,64 @@ macro_rules! mp4box_gen {
             f64::from_be_bytes([slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7]])
         }
     };
-    { @read $input:ident $state:ident $header:ident; [u8; $n:expr] } => { // Might also work with sizes defined by variables
+    { @read $input:ident $state:ident $header:ident; [$type:tt; $n:expr] } => { // Might also work with sizes defined by variables
         {
             let mut array = [0; $n];
-            array.copy_from_slice(read($input, $state, $n).unwrap());
+            for i in 0..$n {
+                array[i] = mp4box_gen! { @read $input $state $header; $type };
+            }
             array
         }
-    };
-    { @read $input:ident $state:ident $header:ident; [u8] } => {
-        read($input, $state, $input.len() - $state.offset).unwrap()
     };
     { @read $input:ident $state:ident $header:ident; Mp4Box } => {
         parse_box($input, $state).unwrap()
     };
+    { @read $input:ident $state:ident $header:ident; String } => {
+        {
+            // Read CString in utf8
+            let mut string = String::new();
+
+            let mut bytes = Vec::new();
+            while let Some(byte) = read($input, $state, 1) {
+                if byte[0] == 0 {
+                    break;
+                }
+
+                // Read utf8 character
+                match byte[0] {
+                    0..=0x7F => {
+                        // 1 byte
+                        bytes.push(byte[0]);
+                    },
+                    0xC0..=0xDF => {
+                        // 2 bytes
+                        bytes.push(byte[0]);
+                        bytes.push(read($input, $state, 1).unwrap()[0]);
+                    },
+                    0xE0..=0xEF => {
+                        // 3 bytes
+                        bytes.push(byte[0]);
+                        bytes.push(read($input, $state, 1).unwrap()[0]);
+                        bytes.push(read($input, $state, 1).unwrap()[0]);
+                    },
+                    0xF0..=0xF7 => {
+                        // 4 bytes
+                        bytes.push(byte[0]);
+                        bytes.push(read($input, $state, 1).unwrap()[0]);
+                        bytes.push(read($input, $state, 1).unwrap()[0]);
+                        bytes.push(read($input, $state, 1).unwrap()[0]);
+                    },
+                    _ => panic!("Invalid utf8 character"),
+                }
+            }
+
+            // Convert to string
+            string.push_str(std::str::from_utf8(&bytes).unwrap());
+
+            string
+        }
+    };
+
 
     // Generic catch-all for metastructs
     { @read $input:ident $state:ident $header:ident; $($type:tt)* } => {
@@ -103,10 +151,90 @@ macro_rules! mp4box_gen {
         <$($type)*>::parse($input, $state, &$header)
     };
 
+    // Write Types
+    { @write $output:ident $($item:ident).+; &u8 } => {
+        $output.push(*$($item).+);
+    };
+    { @write $output:ident $($item:ident).+; u8 } => {
+        $output.push($($item).+);
+    };
+    { @write $output:ident $($item:ident).+; &u16 } => {
+        $output.extend_from_slice(&u16::to_be_bytes(*$($item).+));
+    };
+    { @write $output:ident $($item:ident).+; u16 } => {
+        $output.extend_from_slice(&u16::to_be_bytes($($item).+));
+    };
+    { @write $output:ident $($item:ident).+; &u32 } => {
+        $output.extend_from_slice(&u32::to_be_bytes(*$($item).+));
+    };
+    { @write $output:ident $($item:ident).+; u32 } => {
+        $output.extend_from_slice(&u32::to_be_bytes($($item).+));
+    };
+    { @write $output:ident $($item:ident).+; &u64 } => {
+        $output.extend_from_slice(&u64::to_be_bytes(*$($item).+));
+    };
+    { @write $output:ident $($item:ident).+; u64 } => {
+        $output.extend_from_slice(&u64::to_be_bytes($($item).+));
+    };
+    { @write $output:ident $($item:ident).+; i8 } => {
+        $output.push($($item).+ as u8);
+    };
+    { @write $output:ident $($item:ident).+; i16 } => {
+        $output.extend_from_slice(&i16::to_be_bytes($($item).+));
+    };
+    { @write $output:ident $($item:ident).+; &i32 } => {
+        $output.extend_from_slice(&i32::to_be_bytes(*$($item).+));
+    };
+    { @write $output:ident $($item:ident).+; i32 } => {
+        $output.extend_from_slice(&i32::to_be_bytes($($item).+));
+    };
+    { @write $output:ident $($item:ident).+; i64 } => {
+        $output.extend_from_slice(&i64::to_be_bytes($($item).+));
+    };
+    { @write $output:ident $($item:ident).+; f32 } => {
+        $output.extend_from_slice(&f32::to_be_bytes($($item).+));
+    };
+    { @write $output:ident $($item:ident).+; f64 } => {
+        $output.extend_from_slice(&f64::to_be_bytes($($item).+));
+    };
+    { @write $output:ident $($item:ident).+; [$type:tt; $n:expr] } => { // Might also work with sizes defined by variables
+        for entry in $($item).+ {
+            mp4box_gen! { @write $output entry; $type };
+        }
+    };
+    { @write $output:ident $($item:ident).+; &[$type:tt; $n:expr] } => { // Might also work with sizes defined by variables
+        for entry in $($item).+ {
+            let entry = *entry;
+            mp4box_gen! { @write $output entry; $type };
+        }
+    };
+    { @write $output:ident $($item:ident).+; String } => {
+        $output.extend_from_slice($($item).+.as_bytes());
+    };
+
+    // Generic catch-all for metastructs
+    { @write $output:ident $($item:ident).+; $($type:tt)* } => {
+        $($item).+.write($output);
+    };
+
     // Condition expansion
-    // Final layer
+    // Final layer Read
+    { // vec w/ no length
+        @cond read
+        $input:ident $state:ident $header:ident;
+        [Vec<$type:tt, Remain>],
+    } => {
+        {
+            let length = ($input.len() - $state.offset) / std::mem::size_of::<$type>();
+            let mut vec = Vec::with_capacity(length);
+            for _ in 0..length {
+                vec.push(mp4box_gen! { @read $input $state $header; $type });
+            }
+            vec
+        }
+    };
     { // vec w/ non-option length
-        @cond
+        @cond read
         $input:ident $state:ident $header:ident;
         [Vec<$type:tt, $length:ident>],
     } => {
@@ -120,12 +248,12 @@ macro_rules! mp4box_gen {
         }
     };
     { // vec w/ option length
-        @cond
+        @cond read
         $input:ident $state:ident $header:ident;
-        [Vec<$type:tt, Option<$length:ident>>],
+        [Vec<$type:tt, Option<[$($length:tt)*]>>],
     } => {
         {
-            let length = $length.unwrap() as usize;
+            let length = ($($length)*) as usize;
             let mut vec = Vec::with_capacity(length);
             for _ in 0..length {
                 vec.push(mp4box_gen! { @read $input $state $header; $type });
@@ -134,38 +262,135 @@ macro_rules! mp4box_gen {
         }
     };
     { // Simple type
-        @cond
-        $input:ident $state:ident $header:ident;
+        @cond read $($opt:ident)*;
         [$type:tt],
     } => {
-        mp4box_gen! { @read $input $state $header; $type }
+        mp4box_gen! { @read $($opt)*; $type }
     };
 
     // Iterate
     { // Either
-        @cond
-        $input:ident $state:ident $header:ident;
+        @cond read $($opt:ident)*;
         [Either<$type:tt, [$($btype:tt)*]>],
         $cond:expr,
         $($rest:tt)*
     } => {
         if $cond {
-            Either::A(mp4box_gen! { @cond $input $state $header; [$type], })
+            Either::A(mp4box_gen! { @cond read $($opt)*; [$type], })
         } else {
-            Either::B(mp4box_gen! { @cond $input $state $header; [$($btype)*], $($rest)* })
+            Either::B(mp4box_gen! { @cond read $($opt)*; [$($btype)*], $($rest)* })
         }
     };
     { // Option
-        @cond
-        $input:ident $state:ident $header:ident;
+        @cond read $($opt:ident)*;
         [Option<[$($type:tt)*]>],
         $cond:expr,
         $($rest:tt)*
     } => {
         if $cond {
-            Some(mp4box_gen! { @cond $input $state $header; [$($type)*], $($rest)* })
+            Some(mp4box_gen! { @cond read $($opt)*; [$($type)*], $($rest)* })
         } else {
             None
+        }
+    };
+
+    // Write
+    { // borrow vec w/ non-option length
+        @cond write
+        $output:ident $($item:ident).+;
+        [&Vec<$type:tt, $length:ident>],
+    } => {
+        for entry in $($item).+ {
+            mp4box_gen! { @write $output entry; $type };
+        }
+    };
+    { // borrow vec w/ option length
+        @cond write
+        $output:ident $($item:ident).+;
+        [&Vec<$type:tt, Option<[$($length:tt)*]>>],
+    } => {
+        for entry in $($item).+ {
+            mp4box_gen! { @write $output entry; $type };
+        }
+    };
+    { // vec w/ non-option length
+        @cond write
+        $output:ident $($item:ident).+;
+        [Vec<$type:tt, $length:ident>],
+    } => {
+        for entry in &$($item).+ {
+            mp4box_gen! { @write $output entry; &$type };
+        }
+    };
+    { // vec w/ option length
+        @cond write
+        $output:ident $($item:ident).+;
+        [Vec<$type:tt, Option<[$($length:tt)*]>>],
+    } => {
+        for entry in $($item).+ {
+            mp4box_gen! { @write $output entry; $type };
+        }
+    };
+    { // Simple type
+        @cond write
+        $output:ident $($item:ident).+;
+        [$type:tt],
+    } => {
+        mp4box_gen! { @write $output $($item).+; $type }
+    };
+    { // Simple type
+        @cond write
+        $output:ident $($item:ident).+;
+        [&$type:tt],
+    } => {
+        mp4box_gen! { @write $output $($item).+; &$type }
+    };
+
+    // Iterate
+    { // borrow Either
+        @cond write
+        $output:ident $($item:ident).+;
+        [&Either<$type:tt, [$($btype:tt)*]>],
+        $cond:expr,
+        $($rest:tt)*
+    } => {
+        match $($item).+ {
+            Either::A(item) => mp4box_gen! { @cond write $output item; [&$type], },
+            Either::B(item) => mp4box_gen! { @cond write $output item; [&$($btype)*], $($rest)* },
+        }
+    };
+    { // Either
+        @cond write
+        $output:ident $($item:ident).+;
+        [Either<$type:tt, [$($btype:tt)*]>],
+        $cond:expr,
+        $($rest:tt)*
+    } => {
+        match $($item).+ {
+            Either::A(item) => mp4box_gen! { @cond write $output item; [$type], },
+            Either::B(item) => mp4box_gen! { @cond write $output item; [$($btype)*], $($rest)* },
+        }
+    };
+    { // borrow Option
+        @cond write
+        $output:ident $($item:ident).+;
+        [&Option<[$($type:tt)*]>],
+        $cond:expr,
+        $($rest:tt)*
+    } => {
+        if let Some(item) = $($item).+ {
+            mp4box_gen! { @cond write $output item; [&$($type)*], $($rest)* }
+        }
+    };
+    { // Option
+        @cond write
+        $output:ident $($item:ident).+;
+        [Option<[$($type:tt)*]>],
+        $cond:expr,
+        $($rest:tt)*
+    } => {
+        if let Some(item) = &$($item).+ {
+            mp4box_gen! { @cond write $output item; [&$($type)*], $($rest)* }
         }
     };
 
@@ -186,6 +411,7 @@ macro_rules! mp4box_gen {
         paste::paste! {
             #[derive(Debug)]
             pub struct [<Box $name>] {
+                header: Option<(u8, u32)>,
                 $(
                     pub $field: $($ftype)*,
                 )+
@@ -198,8 +424,11 @@ macro_rules! mp4box_gen {
 
                 fn parse_full(input: &[u8], state: &mut ParserState) -> Self {
                     let (version, flags) = read_fullbox_header(input, state);
+                    let header = Some((version, flags));
 
-                    Self::parse(input, state, &Some(( version, flags )))
+                    let mut instance = Self::parse(input, state, &header);
+                    instance.header = header;
+                    instance
                 }
 
                 fn parse(input: &[u8], state: &mut ParserState, header: &Option<(u8, u32)>) -> Self {
@@ -209,17 +438,45 @@ macro_rules! mp4box_gen {
                     // Split out into fields so they can reference each other
                     $(
                         let $field = mp4box_gen! {
-                            @cond input state header;
+                            @cond read input state header;
                             [$($ctype)*],
                             $($cond,)*
                         };
                     )+
 
                     Self {
+                        header: None,
                         $(
                             $field,
                         )+
                     }
+                }
+
+                fn write_full(&self, output: &mut Vec<u8>) {
+                    let mut data = Vec::new();
+                    self.write(&mut data);
+
+                    // Write header
+                    let size = data.len() as u32 + 12;
+                    output.extend_from_slice(&u32::to_be_bytes(size)); // Size
+                    output.extend_from_slice(&u32::to_ne_bytes(Self::TYPE)); // Type
+
+                    // Version
+                    let (version, flags) = self.header.unwrap();
+                    output.push(version); // Version (1 byte)
+                    output.extend_from_slice(&u32::to_be_bytes(flags)[1..]); // Flags (3 bytes)
+
+                    output.extend(data);
+                }
+
+                fn write(&self, output: &mut Vec<u8>) {
+                    $(
+                        mp4box_gen! {
+                            @cond write output self.$field;
+                            [$($ctype)*],
+                            $($cond,)*
+                        };
+                    )+
                 }
             }
         }
@@ -245,22 +502,23 @@ macro_rules! mp4box_gen {
                     pub $field: $($ftype)*,
                 )+
             }
+            impl [<Box $name>] {
+                const IDSTR: &[u8] = bstringify::bstringify!([<$name:lower>]);
+            }
             impl Mp4BoxTrait for [<Box $name>] {
-                const TYPE: u32 = u32::from_ne_bytes(bstringify::bstringify!([<$name:lower>])[..4]);
+                const TYPE: u32 = u32::from_ne_bytes([Self::IDSTR[0], Self::IDSTR[1], Self::IDSTR[2], Self::IDSTR[3]]);
 
-                fn parse_full(input: &[u8]) -> Self {
-                    Self::parse(input, &None)
+                fn parse_full(input: &[u8], state: &mut ParserState) -> Self {
+                    Self::parse(input, state, &None)
                 }
 
-                fn parse(input: &[u8], _: &Option<(u8, u32)>) -> Self {
-                    let mut state = ParserState { offset: 0 };
-
+                fn parse(input: &[u8], state: &mut ParserState, _: &Option<(u8, u32)>) -> Self {
                     // Split out into fields so they can reference each other
                     $(
                         let $field = mp4box_gen! {
-                            @cond input state header; // Header is dummy object, not used in this context
+                            @cond read input state header;
                             [$($ctype)*],
-                            $($cond,)*,
+                            $($cond,)*
                         };
                     )+
 
@@ -269,6 +527,27 @@ macro_rules! mp4box_gen {
                             $field,
                         )+
                     }
+                }
+
+                fn write_full(&self, output: &mut Vec<u8>) {
+                    let mut data = Vec::new();
+                    self.write(&mut data);
+
+                    // Write header
+                    let size = data.len() as u32 + 8;
+                    output.extend_from_slice(&u32::to_be_bytes(size)); // Size
+                    output.extend_from_slice(&u32::to_ne_bytes(Self::TYPE)); // Type
+                    output.extend(data);
+                }
+
+                fn write(&self, output: &mut Vec<u8>) {
+                    $(
+                        mp4box_gen! {
+                            @cond write output self.$field;
+                            [$($ctype)*],
+                            $($cond,)*
+                        };
+                    )+
                 }
             }
         }
@@ -334,7 +613,7 @@ macro_rules! mp4box_gen {
     { // Condition
         @expand $version:ident $flags:ident;
         $name:ident $($stype:ident)? {
-            $field:ident: [$type:ident] {
+            $field:ident: [$($type:tt)*] {
                 $(
                     $ifield:ident: $iftype:tt $({$($ifsdef:tt)+})? $([if $ifcond:expr])*
                 ),+ $(,)?
@@ -357,7 +636,7 @@ macro_rules! mp4box_gen {
                     $($rest)* // Remaining fields
                 }; [
                     $($prev)* // Already expanded fields
-                    [$field, [Option<Vec<[<Box $name:camel $field:camel Type>]>>]&[Option<[Vec<[<Box $name:camel $field:camel Type>], Option<$type>>]>]; $cond,],
+                    [$field, [Option<Vec<[<Box $name:camel $field:camel Type>]>>]&[Option<[Vec<[<Box $name:camel $field:camel Type>], Option<[$($type)*]>>]>]; $cond,],
                 ]
             }
         }
@@ -432,6 +711,23 @@ macro_rules! mp4box_gen {
     { // No condition
         @expand $version:ident $flags:ident;
         $name:ident $($stype:ident)? {
+            $field:ident: Vec<$type:tt>,
+            $($rest:tt)* // Remaining fields
+        }; [$($prev:tt)*] // Already expanded fields
+    } => {
+        mp4box_gen! {
+            @expand $version $flags;
+            $name $($stype)? {
+                $($rest)* // Remaining fields
+            }; [
+                $($prev)* // Already expanded fields
+                [$field, [Vec<$type>]&[Vec<$type, Remain>];],
+            ]
+        }
+    };
+    { // No condition
+        @expand $version:ident $flags:ident;
+        $name:ident $($stype:ident)? {
             $field:ident: $type:tt,
             $($rest:tt)* // Remaining fields
         }; [$($prev:tt)*] // Already expanded fields
@@ -471,13 +767,30 @@ macro_rules! mp4box_gen {
                     Self::parse(input, state, &None)
                 }
 
-                fn parse(input: &[u8], state: &mut ParserState, _: &Option<(u8, u32)>) -> Self {
+                fn parse(input: &[u8], state: &mut ParserState, _header: &Option<(u8, u32)>) -> Self {
                     let mut data = vec![];
                     while !is_empty(input, &state) {
-                        data.push(mp4box_gen!{ @read input state header; $type });
+                        data.push(mp4box_gen!{ @read input state _header; $type });
                     }
 
                     Self { data }
+                }
+
+                fn write_full(&self, output: &mut Vec<u8>) {
+                    let mut data = Vec::new();
+                    self.write(&mut data);
+
+                    // Write header
+                    let size = data.len() as u32 + 8;
+                    output.extend_from_slice(&u32::to_be_bytes(size));
+                    output.extend_from_slice(&u32::to_ne_bytes(Self::TYPE));
+                    output.extend(data);
+                }
+
+                fn write(&self, output: &mut Vec<u8>) {
+                    for item in &self.data {
+                        mp4box_gen! { @write output item; &$type }
+                    }
                 }
             }
         }
@@ -489,11 +802,60 @@ macro_rules! mp4box_gen {
         mp4box_gen!{@expand $version $flags; $name Container Mp4Box}
     };
 
+    // Skip box
+    {
+        @expand $version:ident $flags:ident;
+        $name:ident Skip
+    } => {
+        use $crate::base::*;
+        use $crate::r#macro::*;
+
+        paste::paste! {
+            pub struct [<Box $name>] {
+                pub data: Vec<u8>,
+            }
+            impl std::fmt::Debug for [<Box $name>] {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "{}: {:?}", stringify!($name), self.data)
+                }
+            }
+            impl Mp4BoxTrait for [<Box $name>] {
+                const TYPE: u32 = u32::from_ne_bytes(*bstringify::bstringify!([<$name:lower>]));
+
+                fn parse_full(input: &[u8], state: &mut ParserState) -> Self {
+                    Self::parse(input, state, &None)
+                }
+
+                fn parse(input: &[u8], state: &mut ParserState, _: &Option<(u8, u32)>) -> Self {
+                    // Read all data in box into data
+                    let data = read(input, state, input.len() - state.offset).unwrap().to_vec();
+
+                    Self { data }
+                }
+
+                fn write_full(&self, output: &mut Vec<u8>) {
+                    let mut data = Vec::new();
+                    self.write(&mut data);
+
+                    // Write header
+                    let size = data.len() as u32 + 8;
+                    output.extend_from_slice(&u32::to_be_bytes(size));
+                    output.extend_from_slice(&u32::to_ne_bytes(Self::TYPE));
+                    output.extend(data);
+                }
+
+                fn write(&self, output: &mut Vec<u8>) {
+                    output.extend(&self.data);
+                }
+            }
+        }
+    };
+
     {
         $version:ident $flags:ident;
         $($sname:ident $(: $stype:ident $(= $svtype:tt)?)? $({
             $(
-                $field:ident: $ftype:tt $({$($fsdef:tt)+})? $([if $fcond:expr])*
+                $field:ident: $ftype:tt$(<$iftype:tt>)? $({$($fsdef:tt)+})? $([if $fcond:expr])*
             ),+ $(,)?
         })?),* $(,)? // Trailing comma may be omitted
     } => {
@@ -501,7 +863,7 @@ macro_rules! mp4box_gen {
             @expand $version $flags;
             $sname $($stype $($svtype)?)? $({
                 $(
-                    $field: $ftype $({$($fsdef)+})? $([if $fcond])*,
+                    $field: $ftype$(<$iftype>)? $({$($fsdef)+})? $([if $fcond])*,
                 )+
             }; [])?
         })*
@@ -514,6 +876,14 @@ macro_rules! mp4box_gen {
                 fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     match self {
                         $( Mp4Box::$sname(box_) => write!(f, "{:?}", box_), )*
+                    }
+                }
+            }
+
+            impl Mp4Box {
+                pub(crate) fn write(&self, output: &mut Vec<u8>) {
+                    match self {
+                        $( Mp4Box::$sname(box_) => box_.write_full(output), )*
                     }
                 }
             }
@@ -533,6 +903,12 @@ macro_rules! mp4box_gen {
                 match box_ {
                     $(Mp4Box::$sname(_) => [<Box $sname>]::TYPE == type_),*
                 }
+            }
+            pub(crate) fn get_box_type(box_: &Mp4Box) -> String {
+                let int = match box_ {
+                    $(Mp4Box::$sname(_) => [<Box $sname>]::TYPE),*
+                };
+                String::from_utf8(u32::to_ne_bytes(int).to_vec()).unwrap()
             }
         }
     };
