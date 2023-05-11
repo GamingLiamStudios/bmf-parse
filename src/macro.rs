@@ -411,7 +411,7 @@ macro_rules! mp4box_gen {
         paste::paste! {
             #[derive(Debug)]
             pub struct [<Box $name>] {
-                header: Option<(u8, u32)>,
+                pub header: Option<(u8, u32)>,
                 $(
                     pub $field: $($ftype)*,
                 )+
@@ -757,7 +757,15 @@ macro_rules! mp4box_gen {
             }
             impl std::fmt::Debug for [<Box $name>] {
                 fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                    write!(f, "{}: {:?}", stringify!($name), self.data)
+                    if !f.alternate() {
+                        write!(f, "{}: {:?}", stringify!($name), self.data)
+                    } else {
+                        write!(f, "{}: [", stringify!($name))?;
+                        for item in &self.data {
+                            write!(f, "{:#?}, ", item)?;
+                        }
+                        write!(f, "]")
+                    }
                 }
             }
             impl Mp4BoxTrait for [<Box $name>] {

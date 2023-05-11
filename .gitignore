@@ -6,6 +6,4 @@ target/
 .vscode/
 
 # Program specific
-test.mp4
-dec.mp4
-enc.mp4
+*.mp4

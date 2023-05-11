@@ -1,7 +1,9 @@
 #[allow(unused_variables)]
 #[allow(unused_imports)]
-mod base;
+pub mod base;
 pub mod r#macro;
+
+pub use base::Either;
 
 pub mod boxes {
     use crate::r#macro::mp4box_gen;
@@ -178,6 +180,7 @@ pub mod boxes {
                 sample_description_index: u32,
             },
         },
+        // TODO: Make this not an Optional vec & just have it be a vec of size 0 if cond not met
         Stsz : Full {
             sample_size: u32,
             sample_count: u32,
@@ -201,6 +204,10 @@ pub mod boxes {
             default_sample_flags: u32,
         },
         Pssh : Skip,
+        Free : Skip,
+        Edts : Skip,
+        Sgpd : Skip,
+        Sbgp : Skip,
     }
 }
 
@@ -233,7 +240,7 @@ pub fn write_mp4(boxes: &[Mp4Box]) -> Vec<u8> {
 }
 
 // recursive search for box_type
-pub fn find_box<'a>(boxes: &'a [Mp4Box], box_type: &'a [u8; 4]) -> Option<&'a Mp4Box> {
+pub fn find_box<'a>(boxes: &'a mut [Mp4Box], box_type: &'a [u8; 4]) -> Option<&'a mut Mp4Box> {
     let box_type = u32::from_ne_bytes(*box_type);
 
     let mut next_search = vec![boxes];
@@ -247,31 +254,31 @@ pub fn find_box<'a>(boxes: &'a [Mp4Box], box_type: &'a [u8; 4]) -> Option<&'a Mp
             // TODO: macro-ify this part
             match box_ {
                 Mp4Box::Moof(box_) => {
-                    next_search.push(&box_.data);
+                    next_search.push(box_.data.as_mut_slice());
                 }
                 Mp4Box::Traf(box_) => {
-                    next_search.push(&box_.data);
+                    next_search.push(box_.data.as_mut_slice());
                 }
                 Mp4Box::Moov(box_) => {
-                    next_search.push(&box_.data);
+                    next_search.push(box_.data.as_mut_slice());
                 }
                 Mp4Box::Trak(box_) => {
-                    next_search.push(&box_.data);
+                    next_search.push(box_.data.as_mut_slice());
                 }
                 Mp4Box::Mdia(box_) => {
-                    next_search.push(&box_.data);
+                    next_search.push(box_.data.as_mut_slice());
                 }
                 Mp4Box::Minf(box_) => {
-                    next_search.push(&box_.data);
+                    next_search.push(box_.data.as_mut_slice());
                 }
                 Mp4Box::Dinf(box_) => {
-                    next_search.push(&box_.data);
+                    next_search.push(box_.data.as_mut_slice());
                 }
                 Mp4Box::Stbl(box_) => {
-                    next_search.push(&box_.data);
+                    next_search.push(box_.data.as_mut_slice());
                 }
                 Mp4Box::Mvex(box_) => {
-                    next_search.push(&box_.data);
+                    next_search.push(box_.data.as_mut_slice());
                 }
                 _ => {}
             }
